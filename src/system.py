@@ -117,12 +117,40 @@ class SubSystem1(_SubSystem):
     
 class SubSystem2(_SubSystem):
     ready_queue = []
+    threads = []
+    core_count = 2
+
+    def __init__(self,args:dict):
+        super().__init__(args)
+
+    def run(self):
+        for cpu_id in range(1, self.core_count+1):
+            self.threads.append(Thread(target=subsystem_task, args=(self.select_next)))
+
+        # main loop
+        while current_quantum < quantum_limit:
+            pass
 
     def select_next():
         ''' SRTF '''
 
 class SubSystem3(_SubSystem):
 
+    ready_queue = []
+    waiting_queue = []
+    threads = []
+    core_count = 1
+
+    def __init__(self,args:dict):
+        super().__init__(args)
+
+        def run(self):
+            for cpu_id in range(1, self.core_count+1):
+                self.threads.append(Thread(target=subsystem_task, args=(self.select_next)))
+
+            # main loop
+            while current_quantum < quantum_limit:
+                pass
 
     def select_next():
         ''' Rate Monotonic '''    
