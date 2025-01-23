@@ -11,7 +11,6 @@ class MainSystem:
     def main():
         pass
 
-
 class _SubSystem(ABC):
 
     def __init__(self, resources: list):
@@ -23,7 +22,7 @@ class _SubSystem(ABC):
     def select_next():
         ''' Scheduling algorithm '''
         NotImplemented
-    
+ 
 class SubSystem1(_SubSystem):
     def select_next():
         ''' WRR '''
@@ -34,5 +33,4 @@ class SubSystem2(_SubSystem):
 
 class SubSystem3(_SubSystem):
     def select_next():
-        ''' Rate Monotonic '''
-    
+        ''' Rate Monotonic '''    
