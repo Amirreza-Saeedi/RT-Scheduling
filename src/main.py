@@ -1,9 +1,21 @@
 from system import MainSystem
 from task import *
 
+'''
+3 3
+2 5
+4 10
+T11 4 1 0 0 1
+T12 10 0 1 0 2
+T13 20 2 0 0 3
+$
+'''
 if __name__ == '__main__':
     sources=[]
-    Tasks=[]
+    Tasks1=[]
+    Tasks2=[]
+    Tasks3=[]
+
     # init
     for i in range(3):
         line=input().split()
@@ -13,7 +25,20 @@ if __name__ == '__main__':
         sample=line.split()
         if sample[0]== '$':
             break
-        Tasks.append(Sub1Task(sample[0],int(sample[4]),int(sample[1]),[int(sample[2]),int(sample[3])],int(sample[5])))
-        
-    sys = MainSystem({'tasks': Tasks, 'resources': sources[0]}, {}, {})
+        Tasks1.append(Sub1Task(sample[0],int(sample[4]),int(sample[1]),[int(sample[2]),int(sample[3])],int(sample[5])))
+    #inputs for type Task 2
+    while True:
+        line=input()
+        sample=line.split()
+        if sample[0]== '$':
+            break
+        Tasks2.append(Sub2Task(sample[0],int(sample[4]),int(sample[1]),[int(sample[2]),int(sample[3])]))
+    # while True:
+    #     line=input()
+    #     sample=line.split()
+    #     if sample[0]== '$':
+    #         break
+    #     Tasks3.append(Sub3Task(sample[0],int(sample[4]),int(sample[1]),[int(sample[2]),int(sample[3])],int(sample[5]),int(sample[7])))
+    #inputs for type Task 3
+    sys = MainSystem({'tasks': Tasks1, 'resources': sources[0]}, {'tasks': Tasks2, 'resources': sources[1]}, {})
     sys.main()

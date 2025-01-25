@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from threading import Semaphore, Thread, Barrier, Lock
-from core import Core
+from core import *
 from task import *
 import math
 
@@ -8,7 +8,9 @@ import math
 current_quantum = 0
 quantum_lock = Lock()
 barrier = Barrier(5)  # main + sub1 + 3cpu + sub2 + 2cpu + sub3 + 1cpu
-quantum_limit = 50
+quantum_limit = 20
+log1_barrier = Barrier(2)
+log2_barrier = Barrier(2)
 
 class MainSystem:
 
@@ -16,10 +18,6 @@ class MainSystem:
         '''
             :param args1: {resources:list[r1, r2], tasks:list}
         '''
-        print("\n\n")
-        for key, value in args1.items():
-            print(f"{key}: {value}")
-        print("\n\n")
         self.sub1 = SubSystem1(args1)
         # self.sub2 = SubSystem1(args2)
         # self.sub3 = SubSystem1(args3)
@@ -34,35 +32,41 @@ class MainSystem:
             
             # with quantum_lock:
             #     print(f"Quantum {current_quantum} starting.")
-            
             # Signal all threads to start their work for the quantum
             barrier.wait()
 
-            # print subs logs
+            
+            # sig in
+            log1_barrier.wait()
             self.print_logs()
+            # sig out
+            log1_barrier.wait()
+
             
             # Wait for all threads to finish the quantum
             barrier.wait()
             
             with quantum_lock:
+                # print subs logs
                 # print(f"Quantum {current_quantum} finished.\n")
                 current_quantum += 1
 
     def print_logs(self):
-        print(f'quantum {current_quantum}:')
+
+        print(f'~ quantum {current_quantum}:')
         log = self.get_sub1_log()
         print(log)
         pass
 
     def get_sub1_log(self):
-        s = 'sub1:'
-        s += f'\t{self.sub1.resources}'
-        s += f'\t{self.sub1.waiting_queue}'
+        s = 'sub1:\n'
+        s += f'\tfree resources: {self.sub1.resources}\n'
+        s += f'\twaiting: {[t.name for t in self.sub1.waiting_queue]}\n'
         for i in range(self.sub1.core_count):
-            s += f'\t{self.sub1.cores[i].name}:'
-            s += f'\trunning task: {self.sub1.cores[i]}'
-            s += f'\tready queue: {self.sub1.ready_queues[i]}'
-        return
+            s += f'\t{self.sub1.cores[i].name}:\n'
+            s += f'\t\trunning task: {self.sub1.cores[i]}\n'
+            s += f'\t\tready queue: {[t.name for t in self.sub1.ready_queues[i]]}\n'
+        return s
 
     def get_sub2_log(self):
         pass
@@ -71,6 +75,7 @@ class MainSystem:
         pass
 
 class _SubSystem(ABC):
+    cpu_lock = Lock()
 
     def __init__(self, args:dict):
         self.resources = args['resources'] 
@@ -102,19 +107,18 @@ class SubSystem1(_SubSystem):
         super().__init__(args)
         for i in range(self.core_count):
             self.cores.append(Core(f'core{i + 1}', barrier, self.cpu_lock))
-        self.waiting_queue = self.tasks
+        # self.waiting_queue = self.tasks
 
     def select_next(self, ready_queue: list[Task]):
         ''' WRR '''
-        next_task = ready_queue.pop(0)
-        print('@@@ ready q:', ready_queue)
+        next_task = ready_queue[0]
+        next_task.state = Task.State.RUNNING
         sum_burst = [t.burst_time for t in ready_queue]
-        print('@@@ sum burst:', sum_burst)
         next_task.weight = math.ceil(next_task.burst_time / math.gcd(*sum_burst))
+        ready_queue.pop(0)
         return next_task
 
     def run(self):
-        print("---waiting queue1: ",self.waiting_queue)
         for cpu_id in range(self.core_count):
             self.threads.append(Thread(target=self.cores[cpu_id].run))
             self.threads[cpu_id].start()
@@ -135,76 +139,169 @@ class SubSystem1(_SubSystem):
 
                 with self.cpu_lock:
                     barrier.wait()
+
+
+                    ### tasks to wait
+                    for i in range(self.tasks):
+                        if self.tasks[i].arrival_time == current_quantum:
+                            self.waiting_queue.append(self.tasks[i])
+
                     ### wait to ready
                     # for each t if arrive
                     # ready = min(core)
                     # ready.append(t)
-                    print("---waiting queue2: ",self.waiting_queue)
+                    to_remove = []
                     for w in self.waiting_queue:
-                        print('self', self.resources[0])
-                        print('w', w.resources[0])
-                        if w.arrival_time <= current_quantum and \
-                            self.resources[0] >= w.resources[0] and self.resources[1] >= w.resources[1]:
+                        print('qqq', current_quantum)
+                        print("Waiting_queue1111: ",[t.name for t in self.waiting_queue])
+                        print(w.name, w.resources, w.arrival_time)
+                        if self.resources[0] >= w.resources[0] and self.resources[1] >= w.resources[1]:
                             # assign
                             for j in range(2):  
                                 self.resources[j] -= w.resources[j]
-                            balance_index = min([0, 1, 2], key=lambda x: self.cores[x].active_time)  # for load balance sake
-                            print('VVVV w:', w)
-                            self.ready_queues[balance_index].append(w)
-
+                            to_remove.append(w)
+                            print("Waiting_queue----: ",[t.name for t in self.waiting_queue])
+                            w.state = Task.State.READY
+                            self.ready_queues[w.first_cpu - 1].append(w)
+                        print("Waiting_queue2222: ",[t.name for t in self.waiting_queue])
+                    
+                    for i in to_remove:
+                        self.waiting_queue.remove(i)
+                        
                     ### select from ready
                     for i in range(self.core_count):
                         if self.cores[i].is_idle():
-                            # check release
-                            if self.cores[i].running_task != None and self.cores[i].running_task.burst_time == 0:
-                                # self.r1_sem.release(self.cores[i].running_task.resources[0])
-                                # self.r2_sem.release(self.cores[i].running_task.resources[1])
+                            # print(f'>>>idle CPU{i}')
+                            # print(f'rq{i}: {len(self.ready_queues[i])}')
+                            
+                            # release finished task
+                            if self.cores[i].running_task != None and self.cores[i].running_task.is_finished():
+                                
                                 for j in range(2):
                                     self.resources[j] += self.cores[i].running_task.resources[j]
-                            elif self.cores[i].running_task != None:
+                                
+                            # running to ready queue
+                            elif self.cores[i].running_task != None and not self.cores[i].running_task.is_finished():
+                                self.cores[i].running_task.state = Task.State.READY
                                 self.ready_queues[i].append(self.cores[i].running_task)
-                                print("^^^NoneTest: ", self.cores[i].running_task)
-                            elif len(self.ready_queues[i]) > 0:
-                                # select
-                                for k in range(3):
-                                    print(f'rq{k}: {self.ready_queues[k]}')
-                                print('i start', i)
-                                selected_task = self.select_next(self.ready_queues[i])
-                                print('i end', i)
-                                self.cores[i].set_task(selected_task)
 
-                # # Perform work in this quantum
-                # with self.quantum_lock:
-                #     print(f"Subsystem {subsystem_id} - CPU {cpu_id} working in Quantum {self.current_quantum}")
-                
-                # # Simulate logical work
-                # self.do_sub_work(subsystem_id, cpu_id)
-                
-                # # Indicate work is complete
-                # with self.quantum_lock:
-                #     print(f"Subsystem {subsystem_id} - CPU {cpu_id} finished work in Quantum {self.current_quantum}")
-                
-                # Wait for the quantum to end
+                            # ready queue to running
+                            if len(self.ready_queues[i]) > 0:
+                                selected_task = self.select_next(self.ready_queues[i])
+                                self.cores[i].set_task(selected_task)
+                            
+                    
+                    ### load balance
+
+                    log1_barrier.wait()
+                    log1_barrier.wait()
+
+
+                    # load balancing
+                    
                 barrier.wait()
     
 class SubSystem2(_SubSystem):
-    ready_queue = []
-    threads = []
+    ready_queue: list[Sub2Task] = []
+    threads: list[Thread] = []
     core_count = 2
+    cores: list[Core2] = []
+    tasks: list[Sub2Task] = []
 
     def __init__(self,args:dict):
         super().__init__(args)
+        for i in range(self.core_count):
+            self.cores.append(Core2(f'core{i + 1}', barrier, self.cpu_lock))
+
+    def sort(self):
+        '''
+        sort ready queue ascending by burst time
+        '''
+        self.ready_queue.sort(key=lambda a: a.burst_time)
+    
+    def select_next(self):
+        ''' SRTF '''
+        for t in self.ready_queue:
+            if t.resources[0] <= self.resources[0] and t.resources[1] <= self.resources[1]:
+                self.ready_queue.remove(t)
+                # assign resources
+                # t.state 
+                return t
+        return None
 
     def run(self):
-        for cpu_id in range(1, self.core_count+1):
-            self.threads.append(Thread(target=subsystem_task, args=(self.select_next)))
+
+        for cpu_id in range(self.core_count):
+            self.threads.append(Thread(target=self.cores[cpu_id].run))
+            self.threads[cpu_id].start()
 
         # main loop
-        while current_quantum < quantum_limit:
-            pass
+        while True:
 
-    def select_next():
-        ''' SRTF '''
+            with self.cpu_lock:
+                barrier.wait()
+                '''
+                tasks to ready
+                ready to running 
+                running to ready (preemtp)
+                '''
+                
+                ### tasks to ready
+                for t in self.tasks:
+                    if t.arrival_time == current_quantum:
+                        self.ready_queue.append(t)
+
+                ### 
+                for i in range(self.core_count):
+
+                    # release finished task
+                    if self.cores[i].running_task != None and self.cores[i].running_task.is_finished():
+                        for j in range(2):
+                            self.resources[j] += self.cores[i].running_task.resources[j]
+
+                    self.sort()
+
+                    # no running task
+                    if self.cores[i].running_task == None or self.cores[i].running_task.is_finished():
+                        # if len(self.ready_queue) > 0:
+                        task = self.select_next()
+                        if task != None:
+                            for j in range(2):  # assign resources
+                                self.resources[j] += task.resources[j]
+                            task.state = Task.State.RUNNING
+                            self.cores[i].set_task(task)
+
+                    # preemption
+                    else: 
+                        # release temporarily
+                        for j in range(2):
+                            self.resources[j] += self.cores[i].running_task.resources[j]
+                        # select next
+                        task = self.select_next()
+                        # if None undo release
+                        if task == None:
+                            for j in range(2):
+                                self.resources[j] -= self.cores[i].running_task.resources[j]
+                        # if not None 
+                        else:
+                            self.ready_queue.append(self.cores[i].running_task)
+                            self.cores[i].running_task.state = Task.State.READY
+                            self.cores[i].set_task(task)
+                            task.state = Task.State.RUNNING
+                            for j in range(2):
+                                self.resources[j] -= task.resources[j]
+
+                # log barrier
+                log2_barrier.wait()
+                log2_barrier.wait()
+
+                              
+            
+
+
+
+            barrier.wait()
+
 
 class SubSystem3(_SubSystem):
 
