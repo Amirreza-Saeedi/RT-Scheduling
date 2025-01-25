@@ -8,7 +8,7 @@ import math
 current_quantum = 0
 quantum_lock = Lock()
 barrier = Barrier(10)  # main + sub1 + 3cpu + sub2 + 2cpu + sub3 + 1cpu
-quantum_limit = 20
+quantum_limit = 30
 log_barrier = Barrier(4)  # main + 3 subs
 resources_barrier = Barrier(3)  # sub1 + sub2 + sub3 
 
@@ -194,6 +194,7 @@ class SubSystem2(_SubSystem):
     core_count = 2
     cores: list[Core2] = []
     tasks: list[Sub2Task] = []
+    cpu_lock = Lock()
 
     def __init__(self,args:dict):
         super().__init__(args)
@@ -298,10 +299,12 @@ class SubSystem3(_SubSystem):
     core: Core3
     sub1_resources: list[int, int]
     sub2_resources: list[int, int]
+    cpu_lock = Lock()
 
 
     def __init__(self, args: dict, sub1_resources: list, sub2_resources: list):
         super().__init__(args)
+        print('### self.resourser', self.resources)
         self.sub1_resources = sub1_resources
         self.sub2_resources = sub2_resources
         self.core = Core3('core1', barrier, self.cpu_lock)
@@ -349,7 +352,6 @@ class SubSystem3(_SubSystem):
     def run(self):
         self.thread = Thread(target=self.core.run)
         self.thread.start()
-        print('start1')
         
         # main loop
         while True:
@@ -362,8 +364,6 @@ class SubSystem3(_SubSystem):
                 running to ready (preemtp)
 
                 '''
-
-                print('start2')
                 ### tasks to waiting
                 for t in self.tasks:
                     if t.arrival_time == current_quantum:
@@ -372,7 +372,7 @@ class SubSystem3(_SubSystem):
                 ### waiting to ready
                 for w in self.waiting_queue:
                     ## try sub3 resources
-                    w.assign(3, [self.resources])  # assign temporarily
+                    w.assign(3, self.resources)  # assign temporarily
                     if w.is_fully_assigned():
                         self.add_to_ready(w)
 
@@ -389,7 +389,6 @@ class SubSystem3(_SubSystem):
                             else:
                                 w.release_all([self.sub1_resources, self.sub2_resources, self.resources])
 
-                print('start3')
                 ### handle running & ready
                 self.sort(self.ready_queue)
                 ## running finished
@@ -435,7 +434,6 @@ class SubSystem3(_SubSystem):
                     self.core.set_task(task)
 
 
-                print('start4')
                 # open resources for sub1 & sub2 XXX
                 resources_barrier.wait() 
                 # log barrier
