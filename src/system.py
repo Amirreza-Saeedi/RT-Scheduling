@@ -7,10 +7,9 @@ import math
 
 current_quantum = 0
 quantum_lock = Lock()
-barrier = Barrier(5)  # main + sub1 + 3cpu + sub2 + 2cpu + sub3 + 1cpu
+barrier = Barrier(8)  # main + sub1 + 3cpu + sub2 + 2cpu + sub3 + 1cpu
 quantum_limit = 20
-log1_barrier = Barrier(2)
-log2_barrier = Barrier(2)
+log_barrier = Barrier(3)
 
 class MainSystem:
 
@@ -19,12 +18,15 @@ class MainSystem:
             :param args1: {resources:list[r1, r2], tasks:list}
         '''
         self.sub1 = SubSystem1(args1)
-        # self.sub2 = SubSystem1(args2)
-        # self.sub3 = SubSystem1(args3)
+        self.sub2 = SubSystem2(args2)
+        # self.sub3 = SubSystem3(args3)
 
     def main(self):
         sub1_thread = Thread(target=self.sub1.run)
         sub1_thread.start()
+        sub2_thread = Thread(target=self.sub2.run)
+        sub2_thread.start()
+    
         global current_quantum
         
         # main loop
@@ -37,10 +39,10 @@ class MainSystem:
 
             
             # sig in
-            log1_barrier.wait()
+            log_barrier.wait()
             self.print_logs()
             # sig out
-            log1_barrier.wait()
+            log_barrier.wait()
 
             
             # Wait for all threads to finish the quantum
@@ -54,22 +56,28 @@ class MainSystem:
     def print_logs(self):
 
         print(f'~ quantum {current_quantum}:')
-        log = self.get_sub1_log()
-        print(log)
+        # print(self.get_sub1_log())
+        print(self.get_sub2_log())
         pass
 
     def get_sub1_log(self):
         s = 'sub1:\n'
         s += f'\tfree resources: {self.sub1.resources}\n'
-        s += f'\twaiting: {[t.name for t in self.sub1.waiting_queue]}\n'
+        s += f'\twaiting: {[(t.name, t.burst_time) for t in self.sub1.waiting_queue]}\n'
         for i in range(self.sub1.core_count):
             s += f'\t{self.sub1.cores[i].name}:\n'
             s += f'\t\trunning task: {self.sub1.cores[i]}\n'
-            s += f'\t\tready queue: {[t.name for t in self.sub1.ready_queues[i]]}\n'
+            s += f'\t\tready queue: {[(t.name, t.burst_time) for t in self.sub1.ready_queues[i]]}\n'
         return s
 
     def get_sub2_log(self):
-        pass
+        s = 'sub2:\n'
+        s += f'\tfree resources: {self.sub2.resources}\n'
+        s += f'\tready queue: {[(t.name, t.burst_time) for t in self.sub2.ready_queue]}\n'
+        for i in range(self.sub2.core_count):
+            s += f'\t{self.sub2.cores[i].name}:\n'
+            s += f'\t\trunning task: {self.sub2.cores[i]}\n'
+        return s
         
     def get_sub3_log(self):
         pass
@@ -142,28 +150,20 @@ class SubSystem1(_SubSystem):
 
 
                     ### tasks to wait
-                    for i in range(self.tasks):
+                    for i in range(len(self.tasks)):
                         if self.tasks[i].arrival_time == current_quantum:
                             self.waiting_queue.append(self.tasks[i])
 
                     ### wait to ready
-                    # for each t if arrive
-                    # ready = min(core)
-                    # ready.append(t)
                     to_remove = []
                     for w in self.waiting_queue:
-                        print('qqq', current_quantum)
-                        print("Waiting_queue1111: ",[t.name for t in self.waiting_queue])
-                        print(w.name, w.resources, w.arrival_time)
                         if self.resources[0] >= w.resources[0] and self.resources[1] >= w.resources[1]:
                             # assign
                             for j in range(2):  
                                 self.resources[j] -= w.resources[j]
                             to_remove.append(w)
-                            print("Waiting_queue----: ",[t.name for t in self.waiting_queue])
                             w.state = Task.State.READY
                             self.ready_queues[w.first_cpu - 1].append(w)
-                        print("Waiting_queue2222: ",[t.name for t in self.waiting_queue])
                     
                     for i in to_remove:
                         self.waiting_queue.remove(i)
@@ -193,8 +193,8 @@ class SubSystem1(_SubSystem):
                     
                     ### load balance
 
-                    log1_barrier.wait()
-                    log1_barrier.wait()
+                    log_barrier.wait()
+                    log_barrier.wait()
 
 
                     # load balancing
@@ -217,24 +217,25 @@ class SubSystem2(_SubSystem):
         '''
         sort ready queue ascending by burst time
         '''
-        self.ready_queue.sort(key=lambda a: a.burst_time)
+        self.ready_queue.sort(key=lambda task: task.burst_time)
     
     def select_next(self):
         ''' SRTF '''
         for t in self.ready_queue:
             if t.resources[0] <= self.resources[0] and t.resources[1] <= self.resources[1]:
-                self.ready_queue.remove(t)
+                # self.ready_queue.remove(t)
                 # assign resources
                 # t.state 
                 return t
         return None
 
     def run(self):
-
+        # print("start1")
         for cpu_id in range(self.core_count):
             self.threads.append(Thread(target=self.cores[cpu_id].run))
             self.threads[cpu_id].start()
-
+        print([t.name for t in self.tasks])
+        
         # main loop
         while True:
 
@@ -245,7 +246,8 @@ class SubSystem2(_SubSystem):
                 ready to running 
                 running to ready (preemtp)
                 '''
-                
+                # print("start2")
+
                 ### tasks to ready
                 for t in self.tasks:
                     if t.arrival_time == current_quantum:
@@ -255,19 +257,22 @@ class SubSystem2(_SubSystem):
                 for i in range(self.core_count):
 
                     # release finished task
-                    if self.cores[i].running_task != None and self.cores[i].running_task.is_finished():
+                    if self.cores[i].running_task != None and self.cores[i].running_task.is_finished() :
+                        self.cores[i].running_task.burst_time = -1  # flag; so only release resources once
                         for j in range(2):
                             self.resources[j] += self.cores[i].running_task.resources[j]
 
                     self.sort()
 
                     # no running task
-                    if self.cores[i].running_task == None or self.cores[i].running_task.is_finished():
+                    if self.cores[i].running_task == None or \
+                        self.cores[i].running_task.is_finished() or self.cores[i].running_task.burst_time== -1 :
                         # if len(self.ready_queue) > 0:
                         task = self.select_next()
                         if task != None:
+                            self.ready_queue.remove(task)
                             for j in range(2):  # assign resources
-                                self.resources[j] += task.resources[j]
+                                self.resources[j] -= task.resources[j]
                             task.state = Task.State.RUNNING
                             self.cores[i].set_task(task)
 
@@ -279,21 +284,28 @@ class SubSystem2(_SubSystem):
                         # select next
                         task = self.select_next()
                         # if None undo release
-                        if task == None:
+                        if task == None or task.burst_time >= self.cores[i].running_task.burst_time:
                             for j in range(2):
                                 self.resources[j] -= self.cores[i].running_task.resources[j]
                         # if not None 
                         else:
+                            self.ready_queue.remove(task)
                             self.ready_queue.append(self.cores[i].running_task)
                             self.cores[i].running_task.state = Task.State.READY
                             self.cores[i].set_task(task)
                             task.state = Task.State.RUNNING
+
                             for j in range(2):
                                 self.resources[j] -= task.resources[j]
+                            # print("start3")
+
+
 
                 # log barrier
-                log2_barrier.wait()
-                log2_barrier.wait()
+                log_barrier.wait()
+                ''' printing logs '''
+                log_barrier.wait()
+                # print("start4")
 
                               
             
