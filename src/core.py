@@ -34,7 +34,6 @@ class Core:
             
 
     def do_task(self):
-        # print(f'{self.name}, {self.running_task.name}, burst({self.running_task.burst_time}), weight({self.running_task.weight})')
         self.running_task.burst_time -= 1
         self.active_time += 1
         self.timer += 1
@@ -79,7 +78,6 @@ class Core2:
             
 
     def do_task(self):
-        # print(f'{self.name}, {self.running_task.name}, burst({self.running_task.burst_time})')
         self.running_task.burst_time -= 1
         self.active_time += 1
         
@@ -103,7 +101,7 @@ class Core3:
         self.lock = lock
         
     def __str__(self) -> str:
-        return f'{self.name}: {(self.running_task.name, self.running_task.burst_time) if self._is_idle == False else "Idle"}'
+        return f'{self.name}: {(self.running_task.name, self.running_task.cycle_count, self.running_task.remaining_time) if self._is_idle == False else "Idle"}'
     
     def set_task(self, task: Task):
         self.running_task = task
@@ -122,12 +120,12 @@ class Core3:
             
 
     def do_task(self):
-        # print(f'{self.name}, {self.running_task.name}, burst({self.running_task.burst_time})')
         self.running_task.remaining_time -= 1
         self.active_time += 1
     
         
         if self.running_task.remaining_time == 0:
+            self.running_task.remaining_time = self.running_task.burst_time
             self.running_task.cycle_count -= 1
             self.running_task.arrival_time += self.running_task.period  # update
             self._is_idle = True
